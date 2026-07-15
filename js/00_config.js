@@ -10,7 +10,7 @@
 // proxy instead (no secret involved, unlike VA's DMS worker — see
 // md-proxy-worker/README.md for deploy steps). Point this at your
 // deployed worker's /cameras path once it's live.
-const CAMERAS_URL = 'https://md-chart-proxy.YOUR-WORKER-SUBDOMAIN.workers.dev/cameras';
+const CAMERAS_URL = 'https://mdotdms.m-c-hunt429.workers.dev/cameras';
 const MIN_DISPLACEMENT_M = 40;     // min movement before recomputing bearing
 const BEARING_DISAGREE_DEG = 45;   // how much new bearing must differ to challenge current direction
 const BEARING_CONFIRM_COUNT = 2;   // consecutive disagreeing samples needed to flip direction
@@ -49,7 +49,7 @@ const COMMONS_FILEPATH = 'https://commons.wikimedia.org/wiki/Special:FilePath/';
 // Unauthenticated, but same CORS issue as cameras above — routed through
 // the same proxy's /dms path. msgPlain already comes pre-formatted with
 // real spacing between lines/pages (no NTCIP markup decoding needed).
-const MSG_SIGN_URL = 'https://mdotdms.m-c-hunt429.workers.dev/';
+const MSG_SIGN_URL = 'https://mdotdms.m-c-hunt429.workers.dev/dms';
 const MSG_SIGN_RANGE_M = 16093.4;   // 10 miles
 const MSG_SIGN_POLL_MS = 30000;     // re-poll signs this often so a sign 10mi out
                                      // can't silently change message before we reach it
