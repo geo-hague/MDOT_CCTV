@@ -42,7 +42,14 @@ function observeTopBarGroupHeight() {
 }
 
 async function init() {
-  await loadCameras();
+  try {
+    await loadCameras();
+  } catch (err) {
+    // loadCameras() already catches its own errors internally, but this
+    // is a second safety net — nothing below this line should ever be
+    // skipped just because camera loading had a bad day.
+    console.error('Unexpected error during loadCameras():', err);
+  }
   acquireWakeLock();
   observeTopBarGroupHeight();
 

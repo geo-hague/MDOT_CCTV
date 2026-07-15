@@ -76,28 +76,40 @@ function normalizeHighwayName(raw) {
 const MD_ROUTE_PREFIX_MAP = { IS: 'I', US: 'US', MD: 'MD' };
 
 async function loadCameras() {
-  const resp = await fetch(CAMERAS_URL);
-  const json = await resp.json();
-  const records = json.data || [];
+  try {
+    const resp = await fetch(CAMERAS_URL);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const json = await resp.json();
+    const records = json.data || [];
 
-  allCameras = records
-    .filter(c => c.opStatus !== 'HARDWARE_FAILURE') // keep COMM_FAILURE/MARGINAL — those often still load, just flaky; hardware failure never will
-    .map(c => {
-      const lat = Number(c.lat);
-      const lon = Number(c.lon);
-      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
-      const prefix = MD_ROUTE_PREFIX_MAP[String(c.routePrefix || '').toUpperCase()];
-      const roadway = (prefix && c.routeNumber) ? `${prefix}-${c.routeNumber}` : '';
-      return {
-        id: c.id,
-        lat, lon,
-        roadway,
-        direction: '', // CHART's camera feed doesn't include a direction field
-        location: c.description || c.name || '',
-        videoUrl: c.publicVideoURL, // NOT yet confirmed to be a direct stream URL — see caveat above
-      };
-    })
-    .filter(c => c !== null);
+    allCameras = records
+      .filter(c => c.opStatus !== 'HARDWARE_FAILURE') // keep COMM_FAILURE/MARGINAL — those often still load, just flaky; hardware failure never will
+      .map(c => {
+        const lat = Number(c.lat);
+        const lon = Number(c.lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+        const prefix = MD_ROUTE_PREFIX_MAP[String(c.routePrefix || '').toUpperCase()];
+        const roadway = (prefix && c.routeNumber) ? `${prefix}-${c.routeNumber}` : '';
+        return {
+          id: c.id,
+          lat, lon,
+          roadway,
+          direction: '', // CHART's camera feed doesn't include a direction field
+          location: c.description || c.name || '',
+          videoUrl: c.publicVideoURL, // NOT yet confirmed to be a direct stream URL — see caveat above
+        };
+      })
+      .filter(c => c !== null);
 
-  console.log(`Loaded ${allCameras.length} MD cameras.`);
+    console.log(`Loaded ${allCameras.length} MD cameras.`);
+  } catch (err) {
+    // Camera load failing (CORS block, network error, endpoint down, etc.)
+    // must NOT stop the rest of the app from starting — init() awaits this
+    // function, so an uncaught throw here used to silently kill GPS
+    // watching and the simulation button along with it. Fail loud in the
+    // debug panel instead, and keep going with an empty camera list.
+    allCameras = [];
+    setDebug({ camerasLoadError: err.message });
+    console.error('Failed to load MD cameras:', err);
+  }
 }
