@@ -66,13 +66,10 @@ function normalizeHighwayName(raw) {
 // (03_highway.js, 05_cameras.js) can stay unchanged and just deal with
 // { id, lat, lon, roadway, direction, location, videoUrl }.
 //
-// IMPORTANT CAVEAT: publicVideoURL points at an HTML wrapper page
-// (chart.maryland.gov/Video/GetVideo/{id}), not a raw stream — same issue
-// VA's GetVideo pages had initially. The actual stream format (HLS/m3u8 vs
-// something else) hasn't been confirmed yet, so video playback in
-// 05_cameras.js almost certainly needs adjusting once that's known. See
-// the project handoff notes for how to find it (DevTools Network tab
-// while a camera is actually playing on the real CHART site).
+// STREAM URL: confirmed via a captured Network request — see the
+// videoUrl construction below for the Wowza HLS pattern and why it's
+// built from cctvIp + id rather than used directly from publicVideoURL
+// (an HTML wrapper page, not a stream).
 const MD_ROUTE_PREFIX_MAP = { IS: 'I', US: 'US', MD: 'MD' };
 
 async function loadCameras() {
@@ -96,7 +93,16 @@ async function loadCameras() {
           roadway,
           direction: '', // CHART's camera feed doesn't include a direction field
           location: c.description || c.name || '',
-          videoUrl: c.publicVideoURL, // NOT yet confirmed to be a direct stream URL — see caveat above
+          // publicVideoURL is an HTML wrapper page, not a stream — confirmed
+          // by capturing a real request while that page played: Wowza
+          // Streaming Engine serves HLS at rtplive/{id}/chunklist_w{token}.m3u8,
+          // where the _w{token} suffix is a per-session value Wowza
+          // generates dynamically (not something we can construct
+          // ourselves). Wowza always serves a stable master playlist at
+          // the same path minus that suffix — playlist.m3u8 — and hls.js
+          // follows it to the real (session-specific) chunklist
+          // automatically, so we only need this stable URL.
+          videoUrl: c.cctvIp ? `https://${c.cctvIp}/rtplive/${c.id}/playlist.m3u8` : c.publicVideoURL,
         };
       })
       .filter(c => c !== null);
