@@ -10,7 +10,7 @@
 // proxy instead (no secret involved, unlike VA's DMS worker — see
 // md-proxy-worker/README.md for deploy steps). Point this at your
 // deployed worker's /cameras path once it's live.
-const CAMERAS_URL = 'https://mdotdms.m-c-hunt429.workers.dev/cameras';
+const CAMERAS_URL = 'https://md-chart-proxy.YOUR-WORKER-SUBDOMAIN.workers.dev/cameras';
 const MIN_DISPLACEMENT_M = 40;     // min movement before recomputing bearing
 const BEARING_DISAGREE_DEG = 45;   // how much new bearing must differ to challenge current direction
 const BEARING_CONFIRM_COUNT = 2;   // consecutive disagreeing samples needed to flip direction
@@ -26,15 +26,18 @@ const MANIFEST_TIMEOUT_MS = 12000; // if a stream hasn't started playing within 
 const MAX_STREAM_RETRIES = 3;      // automatic retry attempts before showing a manual "tap to retry" button
 
 // ---- Mile marker lookup ----
-// MDOT SHA's Roadway Mile Markers FeatureServer. Unlike VA's feed, route
-// prefix/number are clean separate fields (ID_PREFIX/ID_RTE_NO/ID_MP) —
-// no packed-string decoding needed. BUT: this layer has no direction
-// field at all (VA at least had an unreliable one), and lat/lon come from
-// point geometry rather than flat attributes, in Web Mercator by default —
-// outSR=4326 in the query forces WGS84 lat/lon instead. See the comment
-// on updateMilepostAndDirection() in 03_highway.js for the real
-// consequence of having no direction field: opposite-carriageway markers
-// aren't excluded by the API, only by our own bearing-derived guess.
+// MDOT SHA's Roadway Mile Markers FeatureServer. Route prefix/number are
+// clean separate fields (ID_PREFIX/ID_RTE_NO) — no packed-string decoding
+// needed. ID_MP looked like the milepost field but turned out unreliable
+// in practice; MP_INT_RTE_NAME (e.g. "MILE MARKER 66.0") is the field that
+// actually holds the correct value — parsed out via parseMpFromRteName()
+// in 03_highway.js. This layer also has no direction field at all (VA at
+// least had an unreliable one), and lat/lon come from point geometry
+// rather than flat attributes, in Web Mercator by default — outSR=4326 in
+// the query forces WGS84 lat/lon instead. See the comment on
+// updateMilepostAndDirection() in 03_highway.js for the real consequence
+// of having no direction field: opposite-carriageway markers aren't
+// excluded by the API, only by our own bearing-derived guess.
 const MILEMARKER_QUERY_URL = 'https://mdgeodata.md.gov/imap/rest/services/Transportation/MD_RoadwayMileMarkers/FeatureServer/0/query';
 const MILEMARKER_SEARCH_RADIUS_M = 900;  // ~0.56mi — wide enough to bracket the two nearest signs
 const MILEMARKER_RECHECK_MS = 8000;      // how often we re-query for the current milepost
@@ -49,7 +52,7 @@ const COMMONS_FILEPATH = 'https://commons.wikimedia.org/wiki/Special:FilePath/';
 // Unauthenticated, but same CORS issue as cameras above — routed through
 // the same proxy's /dms path. msgPlain already comes pre-formatted with
 // real spacing between lines/pages (no NTCIP markup decoding needed).
-const MSG_SIGN_URL = 'https://mdotdms.m-c-hunt429.workers.dev/dms';
+const MSG_SIGN_URL = 'https://md-chart-proxy.YOUR-WORKER-SUBDOMAIN.workers.dev/dms';
 const MSG_SIGN_RANGE_M = 16093.4;   // 10 miles
 const MSG_SIGN_POLL_MS = 30000;     // re-poll signs this often so a sign 10mi out
                                      // can't silently change message before we reach it

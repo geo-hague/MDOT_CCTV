@@ -298,6 +298,15 @@ function refreshShieldDirections() {
 // Mercator, so outSR=4326 is required to get plain lat/lon back.
 const MD_PREFIX_TO_TYPE = { IS: 'I', US: 'US', MD: 'MD' };
 
+// ID_MP turned out unreliable in practice — MP_INT_RTE_NAME (e.g. "MILE
+// MARKER 66.0") is the field that actually holds the correct milepost
+// value. Parse the number out of it and use that instead.
+function parseMpFromRteName(raw) {
+  if (!raw) return null;
+  const m = String(raw).match(/MILE\s*MARKER\s*(\d+(?:\.\d+)?)/i);
+  return m ? parseFloat(m[1]) : null;
+}
+
 function mdRouteMatches(attrs, parsedRef) {
   if (!attrs || !parsedRef) return false;
   const type = MD_PREFIX_TO_TYPE[String(attrs.ID_PREFIX || '').trim().toUpperCase()];
@@ -314,7 +323,7 @@ async function queryNearestMileMarkers(lat, lon) {
     spatialRel: 'esriSpatialRelIntersects',
     distance: String(MILEMARKER_SEARCH_RADIUS_M),
     units: 'esriSRUnit_Meter',
-    outFields: 'ID_PREFIX,ID_RTE_NO,MP_SUFFIX,ID_MP,ROAD_NAME',
+    outFields: 'ID_PREFIX,ID_RTE_NO,MP_SUFFIX,ID_MP,ROAD_NAME,MP_INT_RTE_NAME',
     outSR: '4326',          // otherwise geometry comes back in Web Mercator meters, not lat/lon
     returnGeometry: 'true', // MD has no flat lat/lon attribute fields — need geometry.x/y instead
   });
@@ -361,7 +370,7 @@ async function updateMilepostAndDirection(lat, lon) {
 
   const withMeta = features.map(f => {
     const a = f.attributes || {};
-    const mp = a.ID_MP;
+    const mp = parseMpFromRteName(a.MP_INT_RTE_NAME) ?? a.ID_MP;
     const geom = f.geometry || {};
     const dist = (geom.y != null && geom.x != null)
       ? haversineMeters(lat, lon, geom.y, geom.x) // geometry.y = lat, geometry.x = lon (outSR=4326)
@@ -409,7 +418,7 @@ async function updateMilepostAndDirection(lat, lon) {
   }
 
   if (!matched) {
-    setDebug({ milepostLookup: 'no matching-route markers in our direction of travel', sampleRouteAttrs: features.slice(0, 5).map(f => f.attributes && { prefix: f.attributes.ID_PREFIX, rte: f.attributes.ID_RTE_NO }) });
+    setDebug({ milepostLookup: 'no matching-route markers in our direction of travel', sampleRouteAttrs: features.slice(0, 5).map(f => f.attributes && { prefix: f.attributes.ID_PREFIX, rte: f.attributes.ID_RTE_NO, mpRteName: f.attributes.MP_INT_RTE_NAME, idMp: f.attributes.ID_MP }) });
     return;
   }
 
