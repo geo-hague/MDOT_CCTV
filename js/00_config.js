@@ -3,9 +3,14 @@
 // shares top-level `let`/`const` scope with the other js/*.js files.
 
 // ---------- Config ----------
-// CHART's own export endpoint (what chart.maryland.gov's interactive map
-// itself calls) — public, unauthenticated JSON, wrapped as {"data": [...]}.
-const CAMERAS_URL = 'https://chartexp1.sha.maryland.gov/CHARTExportClientService/getCameraMapDataJSON.do';
+// CHART's own export endpoint is unauthenticated but doesn't send CORS
+// headers for third-party origins (it's meant for CHART's own map page on
+// its own domain) — confirmed by a live "NetworkError" fetching it
+// directly from a GitHub Pages origin. Routed through a tiny CORS-only
+// proxy instead (no secret involved, unlike VA's DMS worker — see
+// md-proxy-worker/README.md for deploy steps). Point this at your
+// deployed worker's /cameras path once it's live.
+const CAMERAS_URL = 'https://md-chart-proxy.YOUR-WORKER-SUBDOMAIN.workers.dev/cameras';
 const MIN_DISPLACEMENT_M = 40;     // min movement before recomputing bearing
 const BEARING_DISAGREE_DEG = 45;   // how much new bearing must differ to challenge current direction
 const BEARING_CONFIRM_COUNT = 2;   // consecutive disagreeing samples needed to flip direction
@@ -41,10 +46,10 @@ const MILEMARKER_RECHECK_MS = 8000;      // how often we re-query for the curren
 const COMMONS_FILEPATH = 'https://commons.wikimedia.org/wiki/Special:FilePath/';
 
 // ---- CHART message signs (DMS) ----
-// Unlike VA, this is a plain public JSON endpoint — no account, no token,
-// no proxy needed. msgPlain already comes pre-formatted with real spacing
-// between lines/pages (no NTCIP markup decoding needed either).
-const MSG_SIGN_URL = 'https://chartexp1.sha.maryland.gov/CHARTExportClientService/getDMSMapDataJSON.do';
+// Unauthenticated, but same CORS issue as cameras above — routed through
+// the same proxy's /dms path. msgPlain already comes pre-formatted with
+// real spacing between lines/pages (no NTCIP markup decoding needed).
+const MSG_SIGN_URL = 'https://mdotdms.m-c-hunt429.workers.dev/';
 const MSG_SIGN_RANGE_M = 16093.4;   // 10 miles
 const MSG_SIGN_POLL_MS = 30000;     // re-poll signs this often so a sign 10mi out
                                      // can't silently change message before we reach it
