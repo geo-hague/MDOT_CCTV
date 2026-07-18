@@ -240,12 +240,18 @@ function updateHighwayShields(refs) {
 
     const dirEl = document.createElement('div');
     dirEl.className = 'direction-label';
-    // highwayDirectionLabel must be checked FIRST — it's the corrected value
-    // (bearing normally, but overridden by mile-marker ascending/descending
-    // trend when the road's local bearing disagrees with its true signed
-    // direction, e.g. I-85 Gastonia-Charlotte). The raw bearing guess is
-    // only a fallback for before we have any milepost data yet.
-    const dir = highwayDirectionLabel || bearingToTravelDirection(lastStableBearing, parsed);
+    // highwayDirectionLabels[ref] must be checked FIRST — it's the
+    // corrected, PER-REF value (bearing normally, but overridden by
+    // mile-marker ascending/descending trend when the road's local bearing
+    // disagrees with its true signed direction, e.g. I-85 Gastonia-
+    // Charlotte, or entirely replaced by Inner/Outer for loop refs). Using
+    // this ref's own entry — not a single shared value — is what lets
+    // concurrent refs with genuinely different directions (e.g. I-95
+    // Northbound alongside I-495 Outer, at the same physical point on the
+    // Capital Beltway) each show correctly instead of one overwriting the
+    // other. The raw bearing guess is only a fallback for before we have
+    // any milepost data yet for this specific ref.
+    const dir = highwayDirectionLabels[ref] || bearingToTravelDirection(lastStableBearing, parsed);
     dirEl.textContent = shortDirection(dir);
     wrap.appendChild(dirEl);
     shieldDirEls[ref] = dirEl;
@@ -300,9 +306,9 @@ function updateHighwayShields(refs) {
 function refreshShieldDirections() {
   Object.keys(shieldDirEls).forEach(ref => {
     const parsed = parseHighwayRef(ref);
-    // Same priority as updateHighwayShields() above — highwayDirectionLabel
-    // (mile-marker-corrected) must win over the raw bearing guess.
-    const dir = highwayDirectionLabel || bearingToTravelDirection(lastStableBearing, parsed);
+    // Same priority as updateHighwayShields() above — this ref's own
+    // per-ref direction must win over the raw bearing guess.
+    const dir = highwayDirectionLabels[ref] || bearingToTravelDirection(lastStableBearing, parsed);
     if (dir) shieldDirEls[ref].textContent = shortDirection(dir);
   });
 }
@@ -400,14 +406,14 @@ async function updateMilepostAndDirection(lat, lon) {
   });
 
   // Try every candidate ref (both Interstates of a multiplex, or just the
-  // single primary ref otherwise) and use whichever one actually has mile
-  // markers here — rather than committing to one ref up front by guesswork
-  // and having the whole lookup silently fail if that guess is the one
-  // The DOT doesn't mile-mark at this particular spot (e.g. I-40/I-85: the
-  // markers switch between belonging to I-40 and I-85 depending on where
-  // you are, regardless of which ref sorts "primary").
+  // single primary ref otherwise) — and resolve EACH ONE independently,
+  // not just whichever succeeds first. This matters for concurrencies like
+  // I-95/I-495 on the Capital Beltway: at the exact same physical point,
+  // I-95 is genuinely "Northbound" while I-495 is genuinely "Outer" — a
+  // single shared direction can't represent both, so every ref that has
+  // mile markers here gets its own entry in highwayDirectionLabels.
   const tryRefs = getShieldRefs(currentHighway);
-  let matched = null;
+  const results = {}; // ref -> { parsedForRef, bearingDirection, candidates, isLoop, loopConfig }
   for (const ref of tryRefs) {
     const parsedForRef = parseHighwayRef(ref);
     if (!parsedForRef) continue;
@@ -415,7 +421,7 @@ async function updateMilepostAndDirection(lat, lon) {
     const isLoop = loopConfig !== null;
     const bearingDirection = isLoop ? null : bearingToTravelDirection(lastStableBearing, parsedForRef);
     const routeCandidates = withMeta.filter(f => f.mp != null && mdRouteMatches(f.attrs, parsedForRef));
-    if (!routeCandidates.length) continue;
+    if (!routeCandidates.length) continue; // this ref has no markers here — skip it, but keep resolving the others
 
     // Reject opposite-carriageway markers whenever we know our direction and
     // the marker declares its own. MD's layer has NO direction field at
@@ -427,12 +433,9 @@ async function updateMilepostAndDirection(lat, lon) {
     // nearest-by-distance candidates and skew the interpolated milepost.
     // There's no per-marker fix available from this data source; a real
     // fix would need a separate direction-tagged dataset if MDOT SHA
-    // publishes one. For loop highways this is moot anyway — bearingDirection
-    // is deliberately null above, so dirGuess only ever comes from a
-    // previously-resolved highwayDirectionLabel (already "Inner"/"Outer"
-    // by that point), which nothing in this dataset will ever match either.
+    // publishes one.
     let candidates = routeCandidates;
-    const dirGuess = bearingDirection || highwayDirectionLabel;
+    const dirGuess = bearingDirection || highwayDirectionLabels[ref];
     if (dirGuess) {
       const sameDirection = routeCandidates.filter(f => f.direction === dirGuess);
       if (sameDirection.length) candidates = sameDirection;
@@ -440,106 +443,130 @@ async function updateMilepostAndDirection(lat, lon) {
     }
     if (!candidates.length) continue;
 
-    matched = { ref, parsedForRef, bearingDirection, candidates, isLoop, loopConfig };
-    break;
+    results[ref] = { ref, parsedForRef, bearingDirection, candidates, isLoop, loopConfig };
   }
 
-  if (!matched) {
+  const matchedRefs = Object.keys(results);
+  if (!matchedRefs.length) {
     setDebug({ milepostLookup: 'no matching-route markers in our direction of travel', sampleRouteAttrs: features.slice(0, 5).map(f => f.attributes && { prefix: f.attributes.ID_PREFIX, rte: f.attributes.ID_RTE_NO, mpRteName: f.attributes.MP_INT_RTE_NAME, idMp: f.attributes.ID_MP }) });
     return;
   }
 
-  // Bearing not stable yet (e.g. right after GPS lock) — fall back to
-  // whatever direction we last had, rather than guessing from distance.
-  // For loop highways, bearingDirection is always null (see above), so
-  // this line just preserves whatever Inner/Outer value was already known
-  // from a previous poll — actual resolution happens in the
-  // ascending/descending check further below.
-  highwayDirectionLabel = matched.bearingDirection || highwayDirectionLabel;
+  // One ref still has to "own" the single milepost NUMBER shown in the
+  // mm-sign — use the same Interstate > US > state priority already used
+  // elsewhere, restricted to whichever refs actually resolved here.
+  const primaryRef = primaryHighwayRef(matchedRefs) || matchedRefs[0];
+  let primaryMilepost = null;
+  let primarySnapped = false;
+  let primaryCandidateCount = 0;
 
-  const candidates = matched.candidates;
-  candidates.sort((a, b) => a.dist - b.dist);
-  let interpolated;
-  if (candidates[0].dist <= MM_SNAP_RADIUS_M) {
-    // Close enough to a real sign — use its exact printed value.
-    interpolated = candidates[0].mp;
-  } else if (candidates.length >= 2) {
-    const [a, b] = candidates;
-    const total = a.dist + b.dist;
-    interpolated = total > 0 ? (a.mp * b.dist + b.mp * a.dist) / total : a.mp;
-  } else {
-    interpolated = candidates[0].mp;
-  }
-  const newMilepost = Math.round(interpolated * 10) / 10;
+  matchedRefs.forEach(ref => {
+    const r = results[ref];
+    const candidates = r.candidates;
+    candidates.sort((a, b) => a.dist - b.dist);
+    let interpolated;
+    if (candidates[0].dist <= MM_SNAP_RADIUS_M) {
+      // Close enough to a real sign — use its exact printed value.
+      interpolated = candidates[0].mp;
+    } else if (candidates.length >= 2) {
+      const [a, b] = candidates;
+      const total = a.dist + b.dist;
+      interpolated = total > 0 ? (a.mp * b.dist + b.mp * a.dist) / total : a.mp;
+    } else {
+      interpolated = candidates[0].mp;
+    }
+    const newMilepost = Math.round(interpolated * 10) / 10;
 
-  currentMilepost = newMilepost;
+    // Bearing not stable yet (e.g. right after GPS lock) — fall back to
+    // whatever direction we last had FOR THIS REF, rather than guessing
+    // from distance. For loop refs, bearingDirection is always null (see
+    // above), so this just preserves this ref's last known Inner/Outer
+    // value — actual resolution happens in the ascending/descending
+    // check right below.
+    highwayDirectionLabels[ref] = r.bearingDirection || highwayDirectionLabels[ref] || null;
 
-  // ---- Mile-marker ascending/descending check ----
-  // Single-poll calculation: find the nearest matched marker AHEAD of us
-  // and the nearest one BEHIND us (via bearing projection — same technique
-  // used for camera scoring elsewhere in this file), then just compare
-  // their MP values directly. No need to wait across multiple polls for
-  // this, unlike a naive "compare this reading to the last one" approach.
-  //
-  // This matters because some highway segments physically curve away from
-  // their nominal compass direction — e.g. I-85 between Gastonia and
-  // Charlotte, NC is signed "northbound" the whole way, but the road there
-  // runs east-southeast, which a bearing-only check reads as southbound.
-  // Mile markers always increase in the highway's true SIGNED direction
-  // regardless of local road geometry, so once we can tell which marker is
-  // ahead vs behind, this is authoritative: odd-numbered routes run
-  // nominally north-south (ascending = Northbound, descending =
-  // Southbound); even-numbered ones run nominally east-west (ascending =
-  // Eastbound, descending = Westbound).
-  //
-  // Uses whatever bearing estimate we have, even a not-yet-"stable"
-  // (unconfirmed) one — this is a one-shot direction check, not the
-  // ahead/behind camera math that genuinely needs stability to avoid
-  // flicker, so there's no reason to wait for full bearing confirmation.
-  //
-  // For loop highways, this is the ONLY way direction gets resolved at
-  // all — there's no fallback bearing-derived guess to overwrite, since a
-  // loop has no fixed compass direction. Each loop's rotational
-  // convention (ascendingIsInner) comes from LOOP_HIGHWAYS in
-  // 00_config.js — confirmed different between I-495 and I-695, see the
-  // comment there.
-  const bearingGuess = lastStableBearing != null ? lastStableBearing : pendingBearing;
-  if (bearingGuess != null) {
-    const withProjection = candidates
-      .filter(c => c.lat != null && c.lon != null)
-      .map(c => {
-        const bearingToMarker = bearingDeg(lat, lon, c.lat, c.lon);
-        const angle = angleDiff(bearingToMarker, bearingGuess);
-        return { ...c, proj: c.dist * Math.cos(toRad(angle)) }; // + ahead, - behind
-      });
-    const ahead = withProjection.filter(c => c.proj > 0).sort((a, b) => a.proj - b.proj)[0];
-    const behind = withProjection.filter(c => c.proj <= 0).sort((a, b) => b.proj - a.proj)[0];
-    if (ahead && behind && ahead.mp !== behind.mp) {
-      const ascending = ahead.mp > behind.mp;
-      if (matched.isLoop) {
-        const ascendingIsInner = matched.loopConfig.ascendingIsInner;
-        highwayDirectionLabel = ascending
-          ? (ascendingIsInner ? 'Inner' : 'Outer')
-          : (ascendingIsInner ? 'Outer' : 'Inner');
-      } else {
-        highwayDirectionLabel = matched.parsedForRef.isEven
-          ? (ascending ? 'Eastbound' : 'Westbound')
-          : (ascending ? 'Northbound' : 'Southbound');
+    // ---- Mile-marker ascending/descending check ----
+    // Single-poll calculation: find the nearest matched marker AHEAD of us
+    // and the nearest one BEHIND us (via bearing projection — same
+    // technique used for camera scoring elsewhere in this file), then just
+    // compare their MP values directly. No need to wait across multiple
+    // polls for this, unlike a naive "compare this reading to the last
+    // one" approach.
+    //
+    // This matters because some highway segments physically curve away
+    // from their nominal compass direction — e.g. I-85 between Gastonia
+    // and Charlotte, NC is signed "northbound" the whole way, but the road
+    // there runs east-southeast, which a bearing-only check reads as
+    // southbound. Mile markers always increase in the highway's true
+    // SIGNED direction regardless of local road geometry, so once we can
+    // tell which marker is ahead vs behind, this is authoritative:
+    // odd-numbered routes run nominally north-south (ascending =
+    // Northbound, descending = Southbound); even-numbered ones run
+    // nominally east-west (ascending = Eastbound, descending = Westbound).
+    //
+    // For loop refs, this is the ONLY way direction gets resolved at all —
+    // there's no fallback bearing-derived guess to overwrite, since a loop
+    // has no fixed compass direction. Each loop's rotational convention
+    // (ascendingIsInner) comes from LOOP_HIGHWAYS in 00_config.js —
+    // confirmed different between I-495 and I-695, see the comment there.
+    //
+    // Uses whatever bearing estimate we have, even a not-yet-"stable"
+    // (unconfirmed) one — this is a one-shot direction check, not the
+    // ahead/behind camera math that genuinely needs stability to avoid
+    // flicker, so there's no reason to wait for full bearing confirmation.
+    const bearingGuess = lastStableBearing != null ? lastStableBearing : pendingBearing;
+    if (bearingGuess != null) {
+      const withProjection = candidates
+        .filter(c => c.lat != null && c.lon != null)
+        .map(c => {
+          const bearingToMarker = bearingDeg(lat, lon, c.lat, c.lon);
+          const angle = angleDiff(bearingToMarker, bearingGuess);
+          return { ...c, proj: c.dist * Math.cos(toRad(angle)) }; // + ahead, - behind
+        });
+      const ahead = withProjection.filter(c => c.proj > 0).sort((a, b) => a.proj - b.proj)[0];
+      const behind = withProjection.filter(c => c.proj <= 0).sort((a, b) => b.proj - a.proj)[0];
+      if (ahead && behind && ahead.mp !== behind.mp) {
+        const ascending = ahead.mp > behind.mp;
+        if (r.isLoop) {
+          const ascendingIsInner = r.loopConfig.ascendingIsInner;
+          highwayDirectionLabels[ref] = ascending
+            ? (ascendingIsInner ? 'Inner' : 'Outer')
+            : (ascendingIsInner ? 'Outer' : 'Inner');
+        } else {
+          highwayDirectionLabels[ref] = r.parsedForRef.isEven
+            ? (ascending ? 'Eastbound' : 'Westbound')
+            : (ascending ? 'Northbound' : 'Southbound');
+        }
       }
     }
-  }
 
-  mmValueEl.textContent = currentMilepost.toFixed(1);
-  mmSignEl.style.display = 'flex';
+    if (ref === primaryRef) {
+      primaryMilepost = newMilepost;
+      primarySnapped = candidates[0].dist <= MM_SNAP_RADIUS_M;
+      primaryCandidateCount = candidates.length;
+    }
+  });
+
+  // Keep the singular highwayDirectionLabel in sync with the primary ref's
+  // direction — used for the single mm-sign display and as a fallback
+  // anywhere a specific ref isn't known (e.g. a DMS sign whose Roadway
+  // text doesn't clearly match any currentHighway ref).
+  highwayDirectionLabel = highwayDirectionLabels[primaryRef] || highwayDirectionLabel;
+
+  if (primaryMilepost != null) {
+    currentMilepost = primaryMilepost;
+    mmValueEl.textContent = currentMilepost.toFixed(1);
+    mmSignEl.style.display = 'flex';
+  }
   updateHighwayShields(tryRefs);
   refreshShieldDirections();
   setDebug({
     milepost: currentMilepost,
-    milepostRef: matched.ref,
+    milepostRef: primaryRef,
+    directionByRef: highwayDirectionLabels,
     direction: highwayDirectionLabel,
-    directionSource: matched.bearingDirection ? 'GPS bearing' : 'carried over (bearing not stable)',
     bearing: lastStableBearing,
-    candidateCount: candidates.length,
-    snapped: candidates[0].dist <= MM_SNAP_RADIUS_M,
+    candidateCount: primaryCandidateCount,
+    snapped: primarySnapped,
   });
 }

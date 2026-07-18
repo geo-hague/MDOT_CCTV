@@ -26,6 +26,14 @@ let overpassFailStreak = 0; // consecutive Overpass failures (network error, non
 let currentMilepost = null;
 let lastMilepostCheck = 0;
 let highwayDirectionLabel = null; // "Eastbound" | "Northbound" | "Southbound" | "Westbound"
+// Per-ref direction, e.g. { "I-95": "Northbound", "I-495": "Outer" } —
+// needed because concurrent refs (e.g. I-95/I-495 on the Capital Beltway)
+// can have genuinely different, independently-correct directions at the
+// exact same physical point. highwayDirectionLabel above is kept in sync
+// with whichever ref is "primary" (for the single mm-sign milepost number
+// and as a DMS fallback), but shield display and DMS matching should use
+// this per-ref map instead wherever a specific ref is known.
+let highwayDirectionLabels = {};
 let shieldGroupRefs = null;      // normalized ref list the shield group currently shows
 let shieldDirEls = {};           // ref -> its direction-label element, so direction text
                                   // can be refreshed without rebuilding/re-fetching shields

@@ -109,17 +109,28 @@ function directionFromSignId(s) {
 // detection would never have picked (or vice versa), which would be a
 // confusing inconsistency.
 function messageSignDirMatches(s) {
-  if (!highwayDirectionLabel) return false; // our own direction isn't known yet — can't confirm
-                                              // a directional sign applies to us, so don't show it
+  // Find which currentHighway ref this sign's Roadway actually corresponds
+  // to, so we compare against THAT ref's own direction — not a single
+  // global fallback, which breaks down whenever concurrent refs have
+  // genuinely different directions at once (e.g. I-95=Northbound,
+  // I-495=Outer, at the same physical point on the Capital Beltway). A
+  // sign tagged for I-495 must be checked against highwayDirectionLabels
+  // ["I-495"], not whichever ref happened to set the global value last.
+  const roadwayUpper = (s.Roadway || '').toUpperCase();
+  const matchedRef = currentHighway.find(h => roadwayUpper.includes(h.replace('-', '')) || roadwayUpper.includes(h));
+  const relevantDirection = (matchedRef && highwayDirectionLabels[matchedRef]) || highwayDirectionLabel;
+
+  if (!relevantDirection) return false; // our own direction isn't known yet — can't confirm
+                                          // a directional sign applies to us, so don't show it
   const signDir = s.DirectionOfTravel;
   if (signDir && signDir !== 'None' && signDir !== 'Unknown') {
     if (signDir === 'All Directions' || signDir === 'Both Directions') return true;
-    return signDir === highwayDirectionLabel;
+    return signDir === relevantDirection;
   }
   // DirectionOfTravel is missing/None/Unknown — fall back to the sign ID's
   // trailing N/S/E/W letter instead of refusing to show the sign at all.
   const inferred = directionFromSignId(s);
-  return inferred ? inferred === highwayDirectionLabel : false;
+  return inferred ? inferred === relevantDirection : false;
 }
 
 function messageSignRoadwayMatches(s) {
