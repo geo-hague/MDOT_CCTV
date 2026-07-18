@@ -16,40 +16,57 @@ function getScoredCameras(lat, lon, minDist, maxDist) {
   const scored = candidates.map(c => {
     const straightLineDist = haversineMeters(lat, lon, c.lat, c.lon);
     const bearingToCam = bearingDeg(lat, lon, c.lat, c.lon);
+    const isLoopRef = !!LOOP_HIGHWAYS[normalizeHighwayName(c.roadway)];
 
     // Project the straight-line distance onto our direction of travel:
     // positive = ahead of us, negative = behind us. This lets a camera
     // stay "in view" and count down through zero as you pass it, rather
     // than disappearing the instant its raw bearing crosses 90°.
+    //
+    // For LOOP refs specifically, using the full projected MAGNITUDE is
+    // actively wrong — confirmed real: your bearing constantly changes as
+    // a loop curves, so a camera clear on the opposite side of the
+    // Beltway can, by geometric coincidence, have a bearing close enough
+    // to yours to project as artificially NEAR, while a camera genuinely
+    // just ahead of you past a curve can project as artificially FAR.
+    // Both directions of that error showed up: distant cameras appearing
+    // as "next", and then (after a since-reverted attempt to fix it by
+    // just shrinking the search radius) nearby cameras getting excluded
+    // too. The actual fix: use real straight-line distance for the
+    // MAGNITUDE (so "closest" always means physically closest), and only
+    // take the coarse ahead/behind SIGN from the bearing projection.
     let dist;
     if (lastStableBearing === null) {
       dist = straightLineDist; // no travel direction locked yet — treat everything as ahead
+    } else if (isLoopRef) {
+      const angle = angleDiff(bearingToCam, lastStableBearing);
+      const sign = Math.cos(toRad(angle)) >= 0 ? 1 : -1;
+      dist = straightLineDist * sign;
     } else {
       const angle = angleDiff(bearingToCam, lastStableBearing);
       dist = straightLineDist * Math.cos(toRad(angle));
     }
 
-    return { cam: c, dist };
+    return { cam: c, dist, isLoopRef };
   }).filter(s => {
-    // Same-tier-type refs (e.g. both I-70 and I-270 of a real multiplex)
-    // all get the full search radius — not just whichever one happens to
-    // be "primary" — EXCEPT loop highways, which are always capped
-    // regardless of tier (see below). Any other strictly LOWER-tier-type
-    // ref gets capped to SECONDARY_REF_RANGE_M too.
+    // Same-tier-type refs (e.g. both I-70 and I-270 of a real multiplex,
+    // or a loop ref like I-695 tied with another Interstate) all get the
+    // full search radius — not just whichever one happens to be
+    // "primary". Only a strictly LOWER-tier-type ref gets capped to
+    // SECONDARY_REF_RANGE_M (e.g. US-25/US-74 alongside I-26 — a genuinely
+    // different, diverging road, unlike a loop which is one continuous
+    // physical road throughout). Loop refs no longer get an extra radius
+    // restriction on top of this — now that distance is computed
+    // correctly above (straight-line, not projected), normal sorting by
+    // distance is enough to prefer nearby loop cameras over far ones,
+    // without needing to artificially exclude anything by radius.
     //
     // NOTE: SECONDARY_REF_RANGE_M lives in 00_config.js and
     // highestPriorityType() lives in 03_highway.js — this file MUST be
     // deployed alongside both, or every call here throws a ReferenceError
     // that silently kills cameras, mile markers, and direction downstream.
     const camParsed = parseHighwayRef(normalizeHighwayName(s.cam.roadway));
-    // Loop highways (I-495, I-695) are NEVER treated as top-tier, even
-    // when their type ties with the actual top type (both "I", say) —
-    // unlike a straight Interstate-Interstate multiplex (I-40/I-85, where
-    // "same ref" really does mean physically co-located), a loop's route
-    // number can refer to a point anywhere around its ~64-mile
-    // circumference. Giving it the full search radius pulled in cameras
-    // from the far side of the Beltway that were never actually nearby.
-    const isTopTier = camParsed && camParsed.type === topType && !LOOP_HIGHWAYS[normalizeHighwayName(s.cam.roadway)];
+    const isTopTier = camParsed && camParsed.type === topType;
     if (isTopTier) return s.dist >= minDist && s.dist <= maxDist;
     const cappedMin = Math.max(minDist, -SECONDARY_REF_RANGE_M);
     const cappedMax = Math.min(maxDist, SECONDARY_REF_RANGE_M);
