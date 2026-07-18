@@ -33,11 +33,23 @@ async function fetchMessageSignsIfNeeded() {
 // a different field.
 const MD_DMS_DIR_WORDS = { NORTH: 'Northbound', SOUTH: 'Southbound', EAST: 'Eastbound', WEST: 'Westbound' };
 
+// I-495 (Capital Beltway) signs use "IL"/"OL" instead of a cardinal
+// direction, e.g. "I-495 IL past Exit 39 MD 190" — no NORTH/SOUTH/EAST/WEST
+// word appears at all on these. Checked first, since the cardinal regex
+// below would simply find nothing on a loop sign's description and
+// silently leave direction unresolved otherwise. Word-bounded so it only
+// matches a standalone "IL"/"OL" token, not a substring of an unrelated word.
+const MD_LOOP_DIR_WORDS = { IL: 'Inner', OL: 'Outer' };
+
 function parseMdDmsLocation(description) {
   if (!description) return { roadway: null, direction: null };
   const desc = description.toUpperCase();
   const routeMatch = desc.match(/\b(I|US|MD)[-\s]?(\d+)\b/);
   const roadway = routeMatch ? `${routeMatch[1]}-${routeMatch[2]}` : null;
+
+  const loopMatch = desc.match(/\b(IL|OL)\b/);
+  if (loopMatch) return { roadway, direction: MD_LOOP_DIR_WORDS[loopMatch[1]] };
+
   const dirMatch = desc.match(/\b(NORTH|SOUTH|EAST|WEST)\b/);
   const direction = dirMatch ? MD_DMS_DIR_WORDS[dirMatch[1]] : null;
   return { roadway, direction };

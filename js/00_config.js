@@ -17,6 +17,27 @@ const BEARING_CONFIRM_COUNT = 2;   // consecutive disagreeing samples needed to 
 const HIGHWAY_RECHECK_MS = 6000;   // re-run highway snap at most this often (base rate — backs off on repeated failures, see overpassFailStreak in 01_state.js)
 const HIGHWAY_RECHECK_MAX_MS = 90000; // cap for the exponential backoff below, so we never go longer than 90s between attempts even during a sustained outage/rate-limit
 const HIGHWAY_CONFIRM_COUNT = 2;   // consecutive matching reads needed before switching displayed highway
+// Highways where mile markers/DMS use a carriageway label ("Inner"/"Outer")
+// instead of a compass direction. Bearing-derived direction is actively
+// wrong on a loop (you head every cardinal direction at different points
+// around it), so these get special-cased in updateMilepostAndDirection()
+// in 03_highway.js to resolve direction from ascending/descending milepost
+// trend instead — see the comment there.
+//
+// Each entry's convention is NOT universal — confirmed different for
+// MD's two loops specifically:
+//   I-695 (Baltimore Beltway): the "expected" convention — mileposts
+//     ascend clockwise, so ascending = Inner. ascendingIsInner: true.
+//   I-495 (Capital Beltway): an exception, because its mile numbering is
+//     forced to align with I-95's own numbering (which enters MD from the
+//     Virginia state line and increases heading north/clockwise around
+//     the west side) rather than following its own loop's natural
+//     rotational count — so I-495 ascends counter-clockwise, meaning
+//     ascending = Outer. ascendingIsInner: false.
+const LOOP_HIGHWAYS = {
+  'I-495': { ascendingIsInner: false },
+  'I-695': { ascendingIsInner: true },
+};
 const MAX_SEARCH_DIST_M = 32186.9; // 20 miles — cameras farther than this on your highway are ignored
 const SECONDARY_REF_RANGE_M = 804.672; // 0.5 miles — when multiple routes are concurrent
                                     // (e.g. locked to ["I-26","US-25","US-74"]), only refs of the

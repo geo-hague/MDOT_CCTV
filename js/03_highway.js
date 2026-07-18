@@ -411,7 +411,9 @@ async function updateMilepostAndDirection(lat, lon) {
   for (const ref of tryRefs) {
     const parsedForRef = parseHighwayRef(ref);
     if (!parsedForRef) continue;
-    const bearingDirection = bearingToTravelDirection(lastStableBearing, parsedForRef);
+    const loopConfig = LOOP_HIGHWAYS[ref] || null;
+    const isLoop = loopConfig !== null;
+    const bearingDirection = isLoop ? null : bearingToTravelDirection(lastStableBearing, parsedForRef);
     const routeCandidates = withMeta.filter(f => f.mp != null && mdRouteMatches(f.attrs, parsedForRef));
     if (!routeCandidates.length) continue;
 
@@ -419,12 +421,16 @@ async function updateMilepostAndDirection(lat, lon) {
     // the marker declares its own. MD's layer has NO direction field at
     // all (f.direction is always null here — see mdRouteMatches/withMeta
     // above), so this branch always falls through to "no direction data,
-    // keep everything" for every marker. That means on a divided highway,
-    // a marker on the opposite carriageway — physically close across the
-    // median — can end up as one of the two nearest-by-distance candidates
-    // and skew the interpolated milepost. There's no per-marker fix
-    // available from this data source; a real fix would need a separate
-    // direction-tagged dataset if MDOT SHA publishes one.
+    // keep everything" for every marker regardless of loop/non-loop. That
+    // means on a divided highway, a marker on the opposite carriageway —
+    // physically close across the median — can end up as one of the two
+    // nearest-by-distance candidates and skew the interpolated milepost.
+    // There's no per-marker fix available from this data source; a real
+    // fix would need a separate direction-tagged dataset if MDOT SHA
+    // publishes one. For loop highways this is moot anyway — bearingDirection
+    // is deliberately null above, so dirGuess only ever comes from a
+    // previously-resolved highwayDirectionLabel (already "Inner"/"Outer"
+    // by that point), which nothing in this dataset will ever match either.
     let candidates = routeCandidates;
     const dirGuess = bearingDirection || highwayDirectionLabel;
     if (dirGuess) {
@@ -434,7 +440,7 @@ async function updateMilepostAndDirection(lat, lon) {
     }
     if (!candidates.length) continue;
 
-    matched = { ref, parsedForRef, bearingDirection, candidates };
+    matched = { ref, parsedForRef, bearingDirection, candidates, isLoop, loopConfig };
     break;
   }
 
@@ -445,6 +451,10 @@ async function updateMilepostAndDirection(lat, lon) {
 
   // Bearing not stable yet (e.g. right after GPS lock) — fall back to
   // whatever direction we last had, rather than guessing from distance.
+  // For loop highways, bearingDirection is always null (see above), so
+  // this line just preserves whatever Inner/Outer value was already known
+  // from a previous poll — actual resolution happens in the
+  // ascending/descending check further below.
   highwayDirectionLabel = matched.bearingDirection || highwayDirectionLabel;
 
   const candidates = matched.candidates;
@@ -486,6 +496,13 @@ async function updateMilepostAndDirection(lat, lon) {
   // (unconfirmed) one — this is a one-shot direction check, not the
   // ahead/behind camera math that genuinely needs stability to avoid
   // flicker, so there's no reason to wait for full bearing confirmation.
+  //
+  // For loop highways, this is the ONLY way direction gets resolved at
+  // all — there's no fallback bearing-derived guess to overwrite, since a
+  // loop has no fixed compass direction. Each loop's rotational
+  // convention (ascendingIsInner) comes from LOOP_HIGHWAYS in
+  // 00_config.js — confirmed different between I-495 and I-695, see the
+  // comment there.
   const bearingGuess = lastStableBearing != null ? lastStableBearing : pendingBearing;
   if (bearingGuess != null) {
     const withProjection = candidates
@@ -499,9 +516,16 @@ async function updateMilepostAndDirection(lat, lon) {
     const behind = withProjection.filter(c => c.proj <= 0).sort((a, b) => b.proj - a.proj)[0];
     if (ahead && behind && ahead.mp !== behind.mp) {
       const ascending = ahead.mp > behind.mp;
-      highwayDirectionLabel = matched.parsedForRef.isEven
-        ? (ascending ? 'Eastbound' : 'Westbound')
-        : (ascending ? 'Northbound' : 'Southbound');
+      if (matched.isLoop) {
+        const ascendingIsInner = matched.loopConfig.ascendingIsInner;
+        highwayDirectionLabel = ascending
+          ? (ascendingIsInner ? 'Inner' : 'Outer')
+          : (ascendingIsInner ? 'Outer' : 'Inner');
+      } else {
+        highwayDirectionLabel = matched.parsedForRef.isEven
+          ? (ascending ? 'Eastbound' : 'Westbound')
+          : (ascending ? 'Northbound' : 'Southbound');
+      }
     }
   }
 
