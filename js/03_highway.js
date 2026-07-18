@@ -527,6 +527,7 @@ async function updateMilepostAndDirection(lat, lon) {
       const behind = withProjection.filter(c => c.proj <= 0).sort((a, b) => b.proj - a.proj)[0];
       if (ahead && behind && ahead.mp !== behind.mp) {
         const ascending = ahead.mp > behind.mp;
+        r.ascending = ascending; // stashed for any loop ref that borrows this via followsRef, below
         if (r.isLoop) {
           const ascendingIsInner = r.loopConfig.ascendingIsInner;
           highwayDirectionLabels[ref] = ascending
@@ -545,6 +546,26 @@ async function updateMilepostAndDirection(lat, lon) {
       primarySnapped = candidates[0].dist <= MM_SNAP_RADIUS_M;
       primaryCandidateCount = candidates.length;
     }
+  });
+
+  // Follow-ref pass: a loop ref configured with followsRef (currently just
+  // I-495 -> I-95) that found NO mile markers of its own this poll — real,
+  // confirmed situation on the I-95/I-495 concurrent segment, where MDOT's
+  // layer has no separately-tagged I-495 markers at all, only I-95's —
+  // borrows whichever followed ref's ascending/descending sense IS
+  // available, applied through its own ascendingIsInner mapping. This runs
+  // for every ref in tryRefs, not just ones in matchedRefs, specifically
+  // BECAUSE the whole point is resolving refs that had zero candidates
+  // above.
+  tryRefs.forEach(ref => {
+    if (highwayDirectionLabels[ref]) return; // already resolved (either from its own markers, or a previous poll)
+    const loopConfig = LOOP_HIGHWAYS[ref];
+    if (!loopConfig || !loopConfig.followsRef) return;
+    const followed = results[loopConfig.followsRef];
+    if (!followed || followed.ascending == null) return;
+    highwayDirectionLabels[ref] = followed.ascending
+      ? (loopConfig.ascendingIsInner ? 'Inner' : 'Outer')
+      : (loopConfig.ascendingIsInner ? 'Outer' : 'Inner');
   });
 
   // Keep the singular highwayDirectionLabel in sync with the primary ref's

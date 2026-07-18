@@ -35,7 +35,15 @@ const HIGHWAY_CONFIRM_COUNT = 2;   // consecutive matching reads needed before s
 //     rotational count — so I-495 ascends counter-clockwise, meaning
 //     ascending = Outer. ascendingIsInner: false.
 const LOOP_HIGHWAYS = {
-  'I-495': { ascendingIsInner: false },
+  // followsRef: on the segment where I-495 and I-95 run concurrently
+  // (confirmed: I-495's numbering there IS I-95's — MDOT's mile marker
+  // layer has no separately-tagged ID_RTE_NO=495 markers on that stretch
+  // at all), I-495 has no mile-marker candidates of its own to resolve
+  // ascending/descending from. When that happens, borrow whichever
+  // concurrently-locked ref's own ascending/descending sense is available
+  // instead — applied through I-495's OWN ascendingIsInner mapping below,
+  // so "I-95 ascending here" still correctly becomes "I-495 = Outer".
+  'I-495': { ascendingIsInner: false, followsRef: 'I-95' },
   'I-695': { ascendingIsInner: true },
 };
 const MAX_SEARCH_DIST_M = 32186.9; // 20 miles — cameras farther than this on your highway are ignored
