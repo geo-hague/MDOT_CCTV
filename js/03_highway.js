@@ -330,8 +330,15 @@ const MD_PREFIX_TO_TYPE = { IS: 'I', US: 'US', MD: 'MD' };
 // value. Parse the number out of it and use that instead.
 function parseMpFromRteName(raw) {
   if (!raw) return null;
-  const m = String(raw).match(/MILE\s*MARKER\s*(\d+(?:\.\d+)?)/i);
-  return m ? parseFloat(m[1]) : null;
+  // Some records embed IL/OL (or possibly other tokens) between "MARKER"
+  // and the actual number — confirmed real: "MILE MARKER IL 14.5" — which
+  // broke a regex anchored directly after "MARKER". The milepost number is
+  // reliably the LAST number in the string regardless of what precedes it,
+  // so just take that instead of trying to match every possible prefix
+  // variant.
+  const matches = String(raw).match(/\d+(?:\.\d+)?/g);
+  if (!matches || !matches.length) return null;
+  return parseFloat(matches[matches.length - 1]);
 }
 
 function mdRouteMatches(attrs, parsedRef) {
