@@ -31,7 +31,14 @@
       </div>
     </div>
 
-    <div id="msg-sign-banner" role="alert"></div>
+    <div id="msg-sign-banner" role="alert">
+      <div id="msg-banner-content"></div>
+      <div id="msg-scan-controls" style="display:none;">
+        <button id="msg-scan-behind-btn" aria-label="Previous sign">◀</button>
+        <button id="msg-scan-counter-btn" aria-label="Return to live tracking"></button>
+        <button id="msg-scan-ahead-btn" aria-label="Next sign">▶</button>
+      </div>
+    </div>
   </div>
 
   <div id="scan-bar">
@@ -70,7 +77,7 @@
           <button id="sim-start-btn">Start simulation</button>
           <button id="sim-stop-btn">Stop</button>
         </div>
-        <div class="sim-hint">Tip: pick two coordinates that are both on the same highway with active VA 511 cameras, a few miles apart, so you're guaranteed to pass real cameras. Open the Debug panel below to watch bearing/highway lock in real time.</div>
+        <div class="sim-hint">Tip: pick two coordinates that are both on the same highway with active MDOT CHART cameras, a few miles apart, so you're guaranteed to pass real cameras. Open the Debug panel below to watch bearing/highway lock in real time.</div>
       </div>
     </details>
   </div>
