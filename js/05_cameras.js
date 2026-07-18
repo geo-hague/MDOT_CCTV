@@ -33,15 +33,23 @@ function getScoredCameras(lat, lon, minDist, maxDist) {
   }).filter(s => {
     // Same-tier-type refs (e.g. both I-70 and I-270 of a real multiplex)
     // all get the full search radius — not just whichever one happens to
-    // be "primary". Only a strictly LOWER-tier-type ref gets capped to
-    // SECONDARY_REF_RANGE_M.
+    // be "primary" — EXCEPT loop highways, which are always capped
+    // regardless of tier (see below). Any other strictly LOWER-tier-type
+    // ref gets capped to SECONDARY_REF_RANGE_M too.
     //
     // NOTE: SECONDARY_REF_RANGE_M lives in 00_config.js and
     // highestPriorityType() lives in 03_highway.js — this file MUST be
     // deployed alongside both, or every call here throws a ReferenceError
     // that silently kills cameras, mile markers, and direction downstream.
     const camParsed = parseHighwayRef(normalizeHighwayName(s.cam.roadway));
-    const isTopTier = camParsed && camParsed.type === topType;
+    // Loop highways (I-495, I-695) are NEVER treated as top-tier, even
+    // when their type ties with the actual top type (both "I", say) —
+    // unlike a straight Interstate-Interstate multiplex (I-40/I-85, where
+    // "same ref" really does mean physically co-located), a loop's route
+    // number can refer to a point anywhere around its ~64-mile
+    // circumference. Giving it the full search radius pulled in cameras
+    // from the far side of the Beltway that were never actually nearby.
+    const isTopTier = camParsed && camParsed.type === topType && !LOOP_HIGHWAYS[normalizeHighwayName(s.cam.roadway)];
     if (isTopTier) return s.dist >= minDist && s.dist <= maxDist;
     const cappedMin = Math.max(minDist, -SECONDARY_REF_RANGE_M);
     const cappedMax = Math.min(maxDist, SECONDARY_REF_RANGE_M);

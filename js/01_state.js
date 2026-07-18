@@ -24,6 +24,16 @@ let overpassFailStreak = 0; // consecutive Overpass failures (network error, non
 // from ascending/descending mileposts) — separate from currentDirectionLabel
 // above, which is a raw compass bearing used only for camera ahead/behind math.
 let currentMilepost = null;
+// Per-ref last-seen milepost, e.g. { "I-95": 9.7 } — backs up the
+// same-poll ahead/behind ascending/descending check in
+// updateMilepostAndDirection() (03_highway.js) for when there aren't
+// enough mile markers in range to bracket both ahead AND behind in a
+// single poll (confirmed real: a sparse stretch with only one candidate
+// in range). Without this, a ref with just one nearby marker could never
+// resolve its own ascending/descending sense at all, which also breaks
+// LOOP_HIGHWAYS' followsRef borrowing (e.g. I-495 borrowing I-95's sense)
+// for any ref whose anchor hit this same sparse-coverage gap.
+let lastMilepostByRef = {};
 let lastMilepostCheck = 0;
 let highwayDirectionLabel = null; // "Eastbound" | "Northbound" | "Southbound" | "Westbound"
 // Per-ref direction, e.g. { "I-95": "Northbound", "I-495": "Outer" } —

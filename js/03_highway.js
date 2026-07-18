@@ -486,12 +486,20 @@ async function updateMilepostAndDirection(lat, lon) {
     highwayDirectionLabels[ref] = r.bearingDirection || highwayDirectionLabels[ref] || null;
 
     // ---- Mile-marker ascending/descending check ----
-    // Single-poll calculation: find the nearest matched marker AHEAD of us
-    // and the nearest one BEHIND us (via bearing projection — same
+    // Primary method, single-poll: find the nearest matched marker AHEAD
+    // of us and the nearest one BEHIND us (via bearing projection — same
     // technique used for camera scoring elsewhere in this file), then just
     // compare their MP values directly. No need to wait across multiple
     // polls for this, unlike a naive "compare this reading to the last
-    // one" approach.
+    // one" approach — BUT it needs at least one candidate on each side to
+    // bracket with, which isn't always available (confirmed real: a
+    // sparse stretch with only one mile marker in range at all). When that
+    // happens, fall back to comparing this poll's milepost against the
+    // last one seen for this same ref (lastMilepostByRef, 01_state.js) —
+    // slower to resolve (needs to actually move between polls first), but
+    // still correct, and critically still populates r.ascending so a loop
+    // ref's followsRef borrowing (below) doesn't silently break just
+    // because its anchor ref hit this sparse-coverage gap.
     //
     // This matters because some highway segments physically curve away
     // from their nominal compass direction — e.g. I-85 between Gastonia
@@ -509,12 +517,26 @@ async function updateMilepostAndDirection(lat, lon) {
     // has no fixed compass direction. Each loop's rotational convention
     // (ascendingIsInner) comes from LOOP_HIGHWAYS in 00_config.js —
     // confirmed different between I-495 and I-695, see the comment there.
-    //
+    const applyAscending = (ascending) => {
+      r.ascending = ascending; // stashed for any loop ref that borrows this via followsRef, below
+      if (r.isLoop) {
+        const ascendingIsInner = r.loopConfig.ascendingIsInner;
+        highwayDirectionLabels[ref] = ascending
+          ? (ascendingIsInner ? 'Inner' : 'Outer')
+          : (ascendingIsInner ? 'Outer' : 'Inner');
+      } else {
+        highwayDirectionLabels[ref] = r.parsedForRef.isEven
+          ? (ascending ? 'Eastbound' : 'Westbound')
+          : (ascending ? 'Northbound' : 'Southbound');
+      }
+    };
+
     // Uses whatever bearing estimate we have, even a not-yet-"stable"
     // (unconfirmed) one — this is a one-shot direction check, not the
     // ahead/behind camera math that genuinely needs stability to avoid
     // flicker, so there's no reason to wait for full bearing confirmation.
     const bearingGuess = lastStableBearing != null ? lastStableBearing : pendingBearing;
+    let resolvedThisPoll = false;
     if (bearingGuess != null) {
       const withProjection = candidates
         .filter(c => c.lat != null && c.lon != null)
@@ -526,20 +548,19 @@ async function updateMilepostAndDirection(lat, lon) {
       const ahead = withProjection.filter(c => c.proj > 0).sort((a, b) => a.proj - b.proj)[0];
       const behind = withProjection.filter(c => c.proj <= 0).sort((a, b) => b.proj - a.proj)[0];
       if (ahead && behind && ahead.mp !== behind.mp) {
-        const ascending = ahead.mp > behind.mp;
-        r.ascending = ascending; // stashed for any loop ref that borrows this via followsRef, below
-        if (r.isLoop) {
-          const ascendingIsInner = r.loopConfig.ascendingIsInner;
-          highwayDirectionLabels[ref] = ascending
-            ? (ascendingIsInner ? 'Inner' : 'Outer')
-            : (ascendingIsInner ? 'Outer' : 'Inner');
-        } else {
-          highwayDirectionLabels[ref] = r.parsedForRef.isEven
-            ? (ascending ? 'Eastbound' : 'Westbound')
-            : (ascending ? 'Northbound' : 'Southbound');
-        }
+        applyAscending(ahead.mp > behind.mp);
+        resolvedThisPoll = true;
       }
     }
+
+    // Fallback: not enough candidates to bracket ahead+behind this poll —
+    // compare against the last milepost seen for this ref instead. Ignores
+    // sub-0.1mi differences as GPS/interpolation noise rather than a real
+    // move.
+    if (!resolvedThisPoll && lastMilepostByRef[ref] != null && Math.abs(newMilepost - lastMilepostByRef[ref]) > 0.1) {
+      applyAscending(newMilepost > lastMilepostByRef[ref]);
+    }
+    lastMilepostByRef[ref] = newMilepost;
 
     if (ref === primaryRef) {
       primaryMilepost = newMilepost;

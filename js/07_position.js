@@ -93,6 +93,7 @@ async function handlePositionInner(lat, lon, source) {
       lastMilepostCheck = 0;
       highwayDirectionLabel = null;
       highwayDirectionLabels = {};
+      lastMilepostByRef = {};
     }
 
     setDebug({
@@ -180,6 +181,7 @@ function startSimulation() {
   lastMilepostCheck = 0;
   highwayDirectionLabel = null;
   highwayDirectionLabels = {};
+  lastMilepostByRef = {};
   shieldGroupRefs = null;
   shieldDirEls = {};
   messageSigns = [];
