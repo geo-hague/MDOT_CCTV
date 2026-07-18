@@ -315,19 +315,27 @@ function refreshShieldDirections() {
 
 // ---------- Mile marker lookup ----------
 // MDOT SHA's fields are clean and separate — ID_PREFIX ("IS"/"US"/"MD"),
-// ID_RTE_NO (plain integer), ID_MP (the milepost value) — no packed-string
-// decoding needed, unlike VA's HTRIS_DEF. There is, however, no direction
-// field at all in this layer (VA at least had an unreliable one), so
-// opposite-carriageway markers on a divided highway can't be excluded by
-// anything the API tells us — only by our own bearing-derived direction
-// guess downstream in updateMilepostAndDirection(). Also: this layer
-// returns geometry (not flat lat/lon attributes) and defaults to Web
-// Mercator, so outSR=4326 is required to get plain lat/lon back.
+// ID_RTE_NO (plain integer) — no packed-string decoding needed there,
+// unlike VA's HTRIS_DEF. ID_MP LOOKS like the milepost field but is
+// confirmed wrong (not just unreliable) — never used, not even as a
+// fallback. MP_INT_RTE_NAME (a text field, e.g. "MILE MARKER 66.0", or
+// "MILE MARKER IL 14.5" with a loop indicator embedded before the number)
+// is the only field actually used for milepost — see
+// parseMpFromRteName() below. This layer also has no direction field at
+// all (VA at least had an unreliable one), so opposite-carriageway
+// markers on a divided highway can't be excluded by anything the API
+// tells us — only by our own bearing-derived direction guess downstream
+// in updateMilepostAndDirection(). Also: this layer returns geometry (not
+// flat lat/lon attributes) and defaults to Web Mercator, so outSR=4326 is
+// required to get plain lat/lon back.
 const MD_PREFIX_TO_TYPE = { IS: 'I', US: 'US', MD: 'MD' };
 
-// ID_MP turned out unreliable in practice — MP_INT_RTE_NAME (e.g. "MILE
-// MARKER 66.0") is the field that actually holds the correct milepost
-// value. Parse the number out of it and use that instead.
+// MP_INT_RTE_NAME is the ONLY source used for milepost — ID_MP is
+// confirmed wrong and is never used, not even as a fallback if this
+// parse fails. Some records embed IL/OL (or possibly other tokens)
+// between "MARKER" and the actual number (confirmed real: "MILE MARKER
+// IL 14.5"), so rather than anchor to a specific prefix pattern, this
+// just takes the LAST number anywhere in the string.
 function parseMpFromRteName(raw) {
   if (!raw) return null;
   // Some records embed IL/OL (or possibly other tokens) between "MARKER"
@@ -404,7 +412,11 @@ async function updateMilepostAndDirection(lat, lon) {
 
   const withMeta = features.map(f => {
     const a = f.attributes || {};
-    const mp = parseMpFromRteName(a.MP_INT_RTE_NAME) ?? a.ID_MP;
+    const mp = parseMpFromRteName(a.MP_INT_RTE_NAME); // ID_MP confirmed unreliable — never fall back to it, even
+                                                         // if MP_INT_RTE_NAME fails to parse. A marker with mp:null
+                                                         // here just gets excluded downstream (f.mp != null filter),
+                                                         // which is correct — better to skip a marker than trust a
+                                                         // known-bad field.
     const geom = f.geometry || {};
     const dist = (geom.y != null && geom.x != null)
       ? haversineMeters(lat, lon, geom.y, geom.x) // geometry.y = lat, geometry.x = lon (outSR=4326)
