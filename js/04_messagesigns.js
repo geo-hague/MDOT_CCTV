@@ -44,9 +44,31 @@ const MD_LOOP_DIR_WORDS = { IL: 'Inner', OL: 'Outer' };
 function parseMdDmsLocation(description) {
   if (!description) return { roadway: null, direction: null };
   const desc = description.toUpperCase();
+
+  // Loop signs can mention OTHER route numbers elsewhere in the
+  // description (e.g. a cross-reference to I-95 at an interchange) that
+  // appear BEFORE the loop highway's own number — confirmed real: a sign
+  // that was genuinely about I-495 (DirectionOfTravel correctly resolved
+  // to "Outer") got its Roadway mis-extracted as "I-95" because I-95 was
+  // mentioned earlier in the text. MDOT SHA's own convention pairs the
+  // loop's route number directly adjacent to its IL/OL token (confirmed
+  // sample: "I-495 IL past Exit 39 MD 190"), so when a loop indicator is
+  // present, prefer whichever route number sits immediately next to it
+  // over the first route number anywhere in the string.
+  const adjacentLoopMatch = desc.match(/\b(I|US|MD)[-\s]?(\d+)\s+(IL|OL)\b/);
+  if (adjacentLoopMatch) {
+    return {
+      roadway: `${adjacentLoopMatch[1]}-${adjacentLoopMatch[2]}`,
+      direction: MD_LOOP_DIR_WORDS[adjacentLoopMatch[3]],
+    };
+  }
+
   const routeMatch = desc.match(/\b(I|US|MD)[-\s]?(\d+)\b/);
   const roadway = routeMatch ? `${routeMatch[1]}-${routeMatch[2]}` : null;
 
+  // IL/OL present but not adjacent to a route number (unexpected phrasing,
+  // not matching the confirmed convention above) — still record the
+  // direction against whatever roadway WAS found, better than nothing.
   const loopMatch = desc.match(/\b(IL|OL)\b/);
   if (loopMatch) return { roadway, direction: MD_LOOP_DIR_WORDS[loopMatch[1]] };
 
